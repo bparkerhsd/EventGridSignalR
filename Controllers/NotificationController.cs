@@ -7,6 +7,7 @@ using EventGridSignalR.Models;
 using Microsoft.ApplicationInsights;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Newtonsoft.Json;
 
@@ -17,18 +18,20 @@ namespace EventGridSignalR.Controllers
     public class NotificationController : Controller
     {
         TelemetryClient client;
+        IHubContext<ChatHub> chatHub;
 
-        public NotificationController()
+        public NotificationController(IHubContext<ChatHub> chatHub)
         {
             client = new TelemetryClient();
-            client.InstrumentationKey = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+            client.InstrumentationKey = "c4c04e6f-ac5e-49f1-a36f-dd61c4ba16cb";
+            this.chatHub = chatHub;
         }
 
         public async void Post([FromBody]List<CustomEvent<SampleEventData>> value)
         {
             try
             {
-                client.TrackEvent($"Post message received. {value.Count} event(s) received.");
+                client.TrackEvent($"NotificationController:Post");
 
                 int count = 0;
                 foreach (var eventValue in value)
@@ -38,64 +41,18 @@ namespace EventGridSignalR.Controllers
                     allData.Add("event id", eventValue.Id);
                     allData.Add("eventdata", data);
 
-                    client.TrackEvent($"Event Data", allData);
-                    await SendEvent($"received an event grid message: {eventValue.Data.Name}");
+                    client.TrackEvent($"NotificationController:Post - Event Data", allData);
+                    await chatHub.Clients.All.InvokeAsync("Send", data);
+                    client.TrackEvent($"NotificationController:Post - Completed Clients.All.InvokeAsync", allData);
                     count++;
 
                 }
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 client.TrackEvent("Exception Occurred. Check Insight Exceptions.");
                 client.TrackException(ex);
             }
-        }
-        private async Task SendEvent(string message)
-        {
-            try
-            {
-                client.TrackEvent("Start SendEvent");
-                var connection = new HubConnectionBuilder()
-                    .WithUrl("https://xxxxxxxxxxxxxxxx.azurewebsites.net/chat")
-                    .WithTransport(Microsoft.AspNetCore.Sockets.TransportType.WebSockets)
-                    .Build();
-                
-                connection.On<string>("Send", data =>
-                {
-                    Console.WriteLine($"Received: {data}");
-                });
-
-                var exceptions = new List<Exception>();
-
-                for (int attempted = 0; attempted < 10; attempted++)
-                {
-                    try
-                    {
-                        if (attempted > 0)
-                        {
-                            System.Threading.Thread.Sleep(3000);
-                        }
-                        await connection.StartAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        exceptions.Add(ex);
-                    }
-                }
-
-                if (exceptions.Count == 0)
-                    await connection.InvokeAsync("Send", message);
-                else
-                    client.TrackEvent($"Could not start connection: {exceptions[0].Message}. Attempts to connect: {exceptions.Count}");
-
-
-            }
-            catch (Exception ex)
-            {
-                client.TrackEvent($"SendEvent - Exception Occurred. Check Insight Exceptions. {ex.Message}");
-                client.TrackException(ex);
-            }
-
         }
     }
 }
